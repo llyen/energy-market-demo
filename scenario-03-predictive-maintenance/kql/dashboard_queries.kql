@@ -1,0 +1,225 @@
+// ============================================================
+// Scenario 03: Predictive Maintenance — Dashboard KQL Queries
+// Database: TurbineTelemetry
+// ============================================================
+
+
+// ─────────────────────────────────────────────────────────────
+// 1. Fleet Overview — Current Status Per Turbine
+// ─────────────────────────────────────────────────────────────
+TurbineSensorData
+| summarize arg_max(timestamp, *) by turbine_id
+| project turbine_id,
+          farm_name,
+          timestamp,
+          status,
+          power_output_kw,
+          wind_speed_ms,
+          vibration_mm_s,
+          gearbox_temp_c,
+          bearing_temp_c
+| sort by farm_name asc, turbine_id asc
+
+
+// ─────────────────────────────────────────────────────────────
+// 2. Vibration Anomaly Detection — Z-Score Above Threshold
+// ─────────────────────────────────────────────────────────────
+let lookback = 24h;
+let z_threshold = 3.0;
+let stats_per_turbine = TurbineSensorData
+    | where timestamp > ago(7d)
+    | where status == "Operating"
+    | summarize avg_vib = avg(vibration_mm_s),
+                std_vib = stdev(vibration_mm_s)
+      by turbine_id;
+TurbineSensorData
+| where timestamp > ago(lookback)
+| where status == "Operating"
+| join kind=inner stats_per_turbine on turbine_id
+| extend z_score = iff(std_vib > 0, (vibration_mm_s - avg_vib) / std_vib, 0.0)
+| where z_score > z_threshold
+| project timestamp,
+          turbine_id,
+          farm_name,
+          vibration_mm_s,
+          avg_vib,
+          std_vib,
+          z_score
+| sort by z_score desc
+
+
+// ─────────────────────────────────────────────────────────────
+// 3. Temperature Trend by Component (Gearbox, Bearing, Generator)
+// ─────────────────────────────────────────────────────────────
+TurbineSensorData
+| where timestamp > ago(48h)
+| where status == "Operating"
+| summarize avg_gearbox = avg(gearbox_temp_c),
+            avg_bearing = avg(bearing_temp_c),
+            avg_generator = avg(generator_temp_c),
+            max_gearbox = max(gearbox_temp_c),
+            max_bearing = max(bearing_temp_c),
+            max_generator = max(generator_temp_c)
+  by bin(timestamp, 1h), farm_name
+| sort by farm_name asc, timestamp asc
+
+
+// ─────────────────────────────────────────────────────────────
+// 4. Power Curve Analysis — Actual vs Theoretical by Wind Speed
+// ─────────────────────────────────────────────────────────────
+// Theoretical power curve approximation for a 3 MW turbine:
+//   P(v) = rated_power * (v^3 - cut_in^3) / (rated_wind^3 - cut_in^3)
+//   where cut_in = 3 m/s, rated_wind = 12 m/s
+let cut_in = 3.0;
+let rated_wind = 12.0;
+let rated_power = 3000.0;
+TurbineSensorData
+| where timestamp > ago(24h)
+| where status == "Operating"
+| where wind_speed_ms >= cut_in and wind_speed_ms <= 25.0
+| extend wind_bin = bin(wind_speed_ms, 0.5)
+| extend theoretical_kw = iff(
+    wind_speed_ms >= rated_wind,
+    rated_power,
+    rated_power * (pow(wind_speed_ms, 3) - pow(cut_in, 3)) / (pow(rated_wind, 3) - pow(cut_in, 3))
+  )
+| summarize actual_avg_kw = avg(power_output_kw),
+            theoretical_avg_kw = avg(theoretical_kw),
+            count = count()
+  by wind_bin
+| extend efficiency_pct = round(actual_avg_kw / theoretical_avg_kw * 100, 1)
+| sort by wind_bin asc
+
+
+// ─────────────────────────────────────────────────────────────
+// 5. Farm-Level Aggregation — Total Output, Avg Availability
+// ─────────────────────────────────────────────────────────────
+let total_readings = TurbineSensorData
+    | where timestamp > ago(24h)
+    | summarize total = count() by farm_name;
+let operating_readings = TurbineSensorData
+    | where timestamp > ago(24h)
+    | where status == "Operating"
+    | summarize operating = count() by farm_name;
+TurbineSensorData
+| where timestamp > ago(24h)
+| summarize total_output_mwh = round(sum(power_output_kw) / 12 / 1000, 2),
+            avg_power_kw = round(avg(power_output_kw), 1),
+            max_power_kw = round(max(power_output_kw), 1),
+            avg_wind_ms = round(avg(wind_speed_ms), 1),
+            turbine_count = dcount(turbine_id)
+  by farm_name
+| join kind=leftouter total_readings on farm_name
+| join kind=leftouter operating_readings on farm_name
+| extend availability_pct = round(todouble(operating) / todouble(total) * 100, 1)
+| project farm_name,
+          turbine_count,
+          total_output_mwh,
+          avg_power_kw,
+          max_power_kw,
+          avg_wind_ms,
+          availability_pct
+| sort by farm_name asc
+
+
+// ─────────────────────────────────────────────────────────────
+// 6. Top 10 Turbines by Vibration Level
+// ─────────────────────────────────────────────────────────────
+TurbineSensorData
+| where timestamp > ago(24h)
+| where status == "Operating"
+| summarize avg_vibration = round(avg(vibration_mm_s), 3),
+            max_vibration = round(max(vibration_mm_s), 3),
+            p95_vibration = round(percentile(vibration_mm_s, 95), 3),
+            avg_gearbox_temp = round(avg(gearbox_temp_c), 1),
+            avg_bearing_temp = round(avg(bearing_temp_c), 1),
+            avg_power_kw = round(avg(power_output_kw), 1),
+            readings = count()
+  by turbine_id, farm_name
+| top 10 by avg_vibration desc
+
+
+// ─────────────────────────────────────────────────────────────
+// 7. Idle / Fault Time Analysis
+// ─────────────────────────────────────────────────────────────
+TurbineSensorData
+| where timestamp > ago(48h)
+| summarize readings_total = count(),
+            readings_operating = countif(status == "Operating"),
+            readings_idle = countif(status == "Idle"),
+            readings_maintenance = countif(status == "Maintenance"),
+            readings_fault = countif(status == "Fault")
+  by turbine_id, farm_name
+| extend operating_pct = round(todouble(readings_operating) / todouble(readings_total) * 100, 1),
+         idle_pct = round(todouble(readings_idle) / todouble(readings_total) * 100, 1),
+         maintenance_pct = round(todouble(readings_maintenance) / todouble(readings_total) * 100, 1),
+         fault_pct = round(todouble(readings_fault) / todouble(readings_total) * 100, 1)
+| where fault_pct > 0 or maintenance_pct > 5
+| sort by fault_pct desc, maintenance_pct desc
+
+
+// ─────────────────────────────────────────────────────────────
+// 8. Bearing Temperature Correlation with Vibration
+// ─────────────────────────────────────────────────────────────
+TurbineSensorData
+| where timestamp > ago(48h)
+| where status == "Operating"
+| summarize avg_bearing_temp = round(avg(bearing_temp_c), 2),
+            avg_vibration = round(avg(vibration_mm_s), 3),
+            max_bearing_temp = round(max(bearing_temp_c), 2),
+            max_vibration = round(max(vibration_mm_s), 3),
+            avg_power_kw = round(avg(power_output_kw), 1)
+  by turbine_id, farm_name
+| extend temp_vib_ratio = round(avg_bearing_temp / avg_vibration, 2)
+| extend risk_flag = iff(avg_bearing_temp > 75 and avg_vibration > 6.0, "HIGH_RISK",
+                     iff(avg_bearing_temp > 65 and avg_vibration > 4.5, "ELEVATED", "NORMAL"))
+| sort by risk_flag asc, avg_bearing_temp desc
+
+
+// ─────────────────────────────────────────────────────────────
+// 9. RPM Distribution Analysis
+// ─────────────────────────────────────────────────────────────
+TurbineSensorData
+| where timestamp > ago(24h)
+| where status == "Operating"
+| extend rpm_bin = bin(rotor_rpm, 1.0)
+| summarize count = count(),
+            avg_power = round(avg(power_output_kw), 1),
+            avg_wind = round(avg(wind_speed_ms), 1)
+  by rpm_bin, farm_name
+| sort by farm_name asc, rpm_bin asc
+
+
+// ─────────────────────────────────────────────────────────────
+// 10. Degradation Trend — Rolling Average of Key Parameters
+// ─────────────────────────────────────────────────────────────
+// Shows 6-hour rolling averages to detect gradual degradation
+let degradation_candidates = TurbineSensorData
+    | where timestamp > ago(48h)
+    | where status == "Operating"
+    | summarize avg_vib = avg(vibration_mm_s) by turbine_id
+    | where avg_vib > 4.0
+    | project turbine_id;
+TurbineSensorData
+| where timestamp > ago(48h)
+| where status == "Operating"
+| where turbine_id in (degradation_candidates)
+| sort by turbine_id asc, timestamp asc
+| partition by turbine_id (
+    extend rolling_vibration = series_fir(vibration_mm_s, repeat(1, 72), true, true),
+           rolling_bearing_temp = series_fir(bearing_temp_c, repeat(1, 72), true, true),
+           rolling_gearbox_temp = series_fir(gearbox_temp_c, repeat(1, 72), true, true),
+           rolling_power = series_fir(power_output_kw, repeat(1, 72), true, true)
+)
+| project timestamp,
+          turbine_id,
+          farm_name,
+          vibration_mm_s,
+          rolling_vibration,
+          bearing_temp_c,
+          rolling_bearing_temp,
+          gearbox_temp_c,
+          rolling_gearbox_temp,
+          power_output_kw,
+          rolling_power
+| sort by turbine_id asc, timestamp asc

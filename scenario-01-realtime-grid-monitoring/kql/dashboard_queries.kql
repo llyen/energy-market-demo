@@ -1,0 +1,211 @@
+// ============================================================================
+// Scenario 01: Real-Time Grid Monitoring — Dashboard KQL Queries
+// Database: GridTelemetry
+// Use these queries as tiles in the Real-Time Dashboard
+// ============================================================================
+
+
+// ---------------------------------------------------------------------------
+// 1. Current Grid Status Overview
+//    Last reading per substation with status, voltage, load
+// ---------------------------------------------------------------------------
+// Title: "Aktualny stan sieci"
+SubstationReadings
+| summarize arg_max(Timestamp, *) by SubstationId
+| project
+    SubstationId,
+    SubstationName,
+    Latitude,
+    Longitude,
+    Status,
+    VoltageKV,
+    LoadPct,
+    FrequencyHz,
+    TransformerTempC,
+    LastReading = Timestamp
+| order by SubstationName asc
+
+
+// ---------------------------------------------------------------------------
+// 2. Voltage Trend Over Last 4 Hours
+//    Timechart showing average voltage per substation
+// ---------------------------------------------------------------------------
+// Title: "Trend napięcia (ostatnie 4h)"
+SubstationReadings
+| where Timestamp > ago(4h)
+| summarize AvgVoltageKV = avg(VoltageKV) by bin(Timestamp, 1m), SubstationName
+| order by Timestamp asc
+| render timechart with (
+    title="Napięcie na stacjach GPZ",
+    xtitle="Czas",
+    ytitle="Napięcie [kV]"
+)
+
+
+// ---------------------------------------------------------------------------
+// 3. Load Heatmap
+//    Average load percentage by substation and hour
+// ---------------------------------------------------------------------------
+// Title: "Heatmapa obciążenia"
+SubstationReadings
+| where Timestamp > ago(24h)
+| extend Hour = bin(Timestamp, 1h)
+| summarize AvgLoadPct = round(avg(LoadPct), 1) by SubstationName, Hour
+| order by Hour asc, SubstationName asc
+| render heatmap with (
+    title="Obciążenie stacji w czasie",
+    xtitle="Czas",
+    ytitle="Stacja"
+)
+
+
+// ---------------------------------------------------------------------------
+// 4. Frequency Deviation Alerts
+//    Readings where frequency deviates more than ±0.3 Hz from 50 Hz
+// ---------------------------------------------------------------------------
+// Title: "Odchylenia częstotliwości"
+SubstationReadings
+| where Timestamp > ago(1h)
+| extend Deviation = abs(FrequencyHz - 50.0)
+| where Deviation > 0.3
+| project
+    Timestamp,
+    SubstationName,
+    FrequencyHz,
+    Deviation = round(Deviation, 3),
+    Status
+| order by Deviation desc
+| take 100
+
+
+// ---------------------------------------------------------------------------
+// 5. Top 10 Most Loaded Substations (Current)
+//    Bar chart of current load levels
+// ---------------------------------------------------------------------------
+// Title: "Top 10 — najwyższe obciążenie"
+SubstationReadings
+| summarize arg_max(Timestamp, *) by SubstationId
+| top 10 by LoadPct desc
+| project SubstationName, LoadPct, ActivePowerMW, Status
+| order by LoadPct desc
+| render barchart with (
+    title="Najbardziej obciążone stacje",
+    xtitle="Stacja",
+    ytitle="Obciążenie [%]"
+)
+
+
+// ---------------------------------------------------------------------------
+// 6. Event Summary — Last 24 Hours
+//    Count of events by type and severity
+// ---------------------------------------------------------------------------
+// Title: "Podsumowanie zdarzeń (24h)"
+SubstationEvents
+| where Timestamp > ago(24h)
+| summarize EventCount = count() by EventType, Severity
+| order by EventCount desc
+| render columnchart with (
+    title="Zdarzenia wg typu i ważności",
+    kind=stacked,
+    xtitle="Typ zdarzenia",
+    ytitle="Liczba zdarzeń"
+)
+
+
+// ---------------------------------------------------------------------------
+// 7. Temperature Alerts
+//    Substations with transformer temperature above 75°C
+// ---------------------------------------------------------------------------
+// Title: "Alerty temperaturowe"
+SubstationReadings
+| summarize arg_max(Timestamp, *) by SubstationId
+| where TransformerTempC > 75
+| project
+    SubstationName,
+    TransformerTempC,
+    AmbientTempC,
+    TempDelta = round(TransformerTempC - AmbientTempC, 1),
+    LoadPct,
+    Status,
+    LastReading = Timestamp
+| order by TransformerTempC desc
+
+
+// ---------------------------------------------------------------------------
+// 8. Power Factor Issues
+//    Substations with power factor below 0.90
+// ---------------------------------------------------------------------------
+// Title: "Problemy ze współczynnikiem mocy"
+SubstationReadings
+| where Timestamp > ago(1h)
+| summarize
+    AvgPF = round(avg(PowerFactor), 3),
+    MinPF = round(min(PowerFactor), 3),
+    Readings = count()
+    by SubstationId, SubstationName
+| where AvgPF < 0.90
+| project
+    SubstationName,
+    AvgPowerFactor = AvgPF,
+    MinPowerFactor = MinPF,
+    Readings
+| order by AvgPowerFactor asc
+
+
+// ---------------------------------------------------------------------------
+// 9. Grid Stability Index
+//    Composite metric across all substations
+//    Higher = more stable (max 100)
+// ---------------------------------------------------------------------------
+// Title: "Indeks stabilności sieci"
+let voltage_score =
+    SubstationReadings
+    | where Timestamp > ago(15m)
+    | summarize AvgVoltage = avg(VoltageKV), StdVoltage = stdev(VoltageKV)
+    | extend VoltageStability = round(max_of(0.0, 100.0 - (StdVoltage / 2.2) * 10), 1)
+    | project VoltageStability;
+let frequency_score =
+    SubstationReadings
+    | where Timestamp > ago(15m)
+    | summarize AvgFreq = avg(FrequencyHz), MaxDeviation = max(abs(FrequencyHz - 50.0))
+    | extend FrequencyStability = round(max_of(0.0, 100.0 - MaxDeviation * 200), 1)
+    | project FrequencyStability;
+let load_score =
+    SubstationReadings
+    | where Timestamp > ago(15m)
+    | summarize AvgLoad = avg(LoadPct), OverloadedCount = countif(LoadPct > 90)
+    | extend LoadStability = round(max_of(0.0, 100.0 - (AvgLoad - 50) * 1.5 - OverloadedCount * 5), 1)
+    | project LoadStability;
+let temp_score =
+    SubstationReadings
+    | where Timestamp > ago(15m)
+    | summarize AvgTemp = avg(TransformerTempC), CriticalCount = countif(TransformerTempC > 85)
+    | extend TempStability = round(max_of(0.0, 100.0 - (AvgTemp - 50) * 1.0 - CriticalCount * 10), 1)
+    | project TempStability;
+voltage_score
+| extend dummy = 1
+| join kind=inner (frequency_score | extend dummy = 1) on dummy
+| join kind=inner (load_score | extend dummy = 1) on dummy
+| join kind=inner (temp_score | extend dummy = 1) on dummy
+| project
+    VoltageStability,
+    FrequencyStability,
+    LoadStability,
+    TempStability,
+    OverallIndex = round((VoltageStability + FrequencyStability + LoadStability + TempStability) / 4.0, 1)
+
+
+// ---------------------------------------------------------------------------
+// 10. Anomaly Timeline
+//     Events plotted over time (scatter / timechart)
+// ---------------------------------------------------------------------------
+// Title: "Oś czasu anomalii"
+SubstationEvents
+| where Timestamp > ago(24h)
+| summarize EventCount = count() by bin(Timestamp, 15m), EventType
+| order by Timestamp asc
+| render timechart with (
+    title="Anomalie w czasie",
+    xtitle="Czas",
+    ytitle="Liczba zdarzeń"
+)

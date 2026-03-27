@@ -1,0 +1,223 @@
+// ============================================================================
+// Scenario 01: Real-Time Grid Monitoring — Data Activator Rules
+// Database: GridTelemetry
+// These KQL queries define the logic for Data Activator (Reflex) triggers
+// ============================================================================
+
+
+// ---------------------------------------------------------------------------
+// RULE 1: Voltage Anomaly Detection
+// Trigger when voltage falls below 210 kV or rises above 240 kV
+// Severity: CRITICAL
+// ---------------------------------------------------------------------------
+// Reflex name: "Anomalia napięcia"
+// Check interval: every 30 seconds
+SubstationReadings
+| where Timestamp > ago(2m)
+| where VoltageKV < 210 or VoltageKV > 240
+| summarize
+    LatestTimestamp = max(Timestamp),
+    AvgVoltage = round(avg(VoltageKV), 2),
+    MinVoltage = round(min(VoltageKV), 2),
+    MaxVoltage = round(max(VoltageKV), 2),
+    ReadingCount = count()
+    by SubstationId, SubstationName, Latitude, Longitude
+| extend
+    AlertType = "Voltage Anomaly",
+    AlertSeverity = "Critical",
+    Description = strcat(
+        "Stacja ", SubstationName,
+        ": napięcie poza zakresem 210-240 kV. ",
+        "Średnia: ", tostring(AvgVoltage), " kV, ",
+        "Min: ", tostring(MinVoltage), " kV, ",
+        "Max: ", tostring(MaxVoltage), " kV. ",
+        "Wykryto w ", tostring(ReadingCount), " odczytach."
+    )
+| project
+    LatestTimestamp,
+    SubstationId,
+    SubstationName,
+    Latitude,
+    Longitude,
+    AlertType,
+    AlertSeverity,
+    AvgVoltage,
+    MinVoltage,
+    MaxVoltage,
+    ReadingCount,
+    Description
+
+
+// ---------------------------------------------------------------------------
+// RULE 2: Frequency Out of Range
+// Trigger when frequency deviates more than ±0.5 Hz from 50 Hz
+// Severity: WARNING → CRITICAL if > ±1.0 Hz
+// ---------------------------------------------------------------------------
+// Reflex name: "Odchylenie częstotliwości"
+// Check interval: every 15 seconds
+SubstationReadings
+| where Timestamp > ago(1m)
+| extend Deviation = abs(FrequencyHz - 50.0)
+| where Deviation > 0.5
+| summarize
+    LatestTimestamp = max(Timestamp),
+    AvgFrequency = round(avg(FrequencyHz), 3),
+    MaxDeviation = round(max(Deviation), 3),
+    ReadingCount = count()
+    by SubstationId, SubstationName, Latitude, Longitude
+| extend
+    AlertType = "Frequency Deviation",
+    AlertSeverity = iff(MaxDeviation > 1.0, "Critical", "Warning"),
+    Description = strcat(
+        "Stacja ", SubstationName,
+        ": odchylenie częstotliwości od 50 Hz. ",
+        "Średnia: ", tostring(AvgFrequency), " Hz, ",
+        "Max odchylenie: ±", tostring(MaxDeviation), " Hz. ",
+        iff(MaxDeviation > 1.0,
+            "KRYTYCZNE — zagrożenie stabilności sieci!",
+            "Ostrzeżenie — monitorować sytuację.")
+    )
+| project
+    LatestTimestamp,
+    SubstationId,
+    SubstationName,
+    Latitude,
+    Longitude,
+    AlertType,
+    AlertSeverity,
+    AvgFrequency,
+    MaxDeviation,
+    ReadingCount,
+    Description
+
+
+// ---------------------------------------------------------------------------
+// RULE 3: Overload Warning
+// Trigger when load exceeds 90%
+// Severity: CRITICAL
+// ---------------------------------------------------------------------------
+// Reflex name: "Przeciążenie stacji"
+// Check interval: every 30 seconds
+SubstationReadings
+| where Timestamp > ago(2m)
+| where LoadPct > 90
+| summarize
+    LatestTimestamp = max(Timestamp),
+    AvgLoad = round(avg(LoadPct), 1),
+    MaxLoad = round(max(LoadPct), 1),
+    AvgPower = round(avg(ActivePowerMW), 1),
+    AvgTemp = round(avg(TransformerTempC), 1),
+    ReadingCount = count()
+    by SubstationId, SubstationName, Latitude, Longitude
+| extend
+    AlertType = "Overload",
+    AlertSeverity = iff(MaxLoad > 95, "Critical", "Warning"),
+    Description = strcat(
+        "Stacja ", SubstationName,
+        ": przeciążenie transformatora! ",
+        "Średnie obciążenie: ", tostring(AvgLoad), "%, ",
+        "Max: ", tostring(MaxLoad), "%. ",
+        "Moc czynna: ", tostring(AvgPower), " MW, ",
+        "Temp. transformatora: ", tostring(AvgTemp), "°C. ",
+        iff(MaxLoad > 95,
+            "KRYTYCZNE — konieczne natychmiastowe odciążenie!",
+            "Ostrzeżenie — zbliżanie do limitu.")
+    )
+| project
+    LatestTimestamp,
+    SubstationId,
+    SubstationName,
+    Latitude,
+    Longitude,
+    AlertType,
+    AlertSeverity,
+    AvgLoad,
+    MaxLoad,
+    AvgPower,
+    AvgTemp,
+    ReadingCount,
+    Description
+
+
+// ---------------------------------------------------------------------------
+// RULE 4: Temperature Critical Alert
+// Trigger when transformer temperature exceeds 85°C
+// Severity: WARNING at >75°C, CRITICAL at >85°C
+// ---------------------------------------------------------------------------
+// Reflex name: "Temperatura krytyczna transformatora"
+// Check interval: every 1 minute
+SubstationReadings
+| where Timestamp > ago(3m)
+| where TransformerTempC > 75
+| summarize
+    LatestTimestamp = max(Timestamp),
+    AvgTemp = round(avg(TransformerTempC), 1),
+    MaxTemp = round(max(TransformerTempC), 1),
+    AvgAmbient = round(avg(AmbientTempC), 1),
+    AvgLoad = round(avg(LoadPct), 1),
+    ReadingCount = count()
+    by SubstationId, SubstationName, Latitude, Longitude
+| extend
+    TempDelta = round(MaxTemp - AvgAmbient, 1),
+    AlertType = "Temperature Critical",
+    AlertSeverity = iff(MaxTemp > 85, "Critical", "Warning"),
+    Description = strcat(
+        "Stacja ", SubstationName,
+        ": wysoka temperatura transformatora! ",
+        "Średnia: ", tostring(AvgTemp), "°C, ",
+        "Max: ", tostring(MaxTemp), "°C ",
+        "(otoczenie: ", tostring(AvgAmbient), "°C, ",
+        "delta: ", tostring(round(MaxTemp - AvgAmbient, 1)), "°C). ",
+        "Obciążenie: ", tostring(AvgLoad), "%. ",
+        iff(MaxTemp > 85,
+            "KRYTYCZNE — ryzyko uszkodzenia uzwojenia!",
+            "Ostrzeżenie — temperatura powyżej normy.")
+    )
+| project
+    LatestTimestamp,
+    SubstationId,
+    SubstationName,
+    Latitude,
+    Longitude,
+    AlertType,
+    AlertSeverity,
+    AvgTemp,
+    MaxTemp,
+    AvgAmbient,
+    TempDelta,
+    AvgLoad,
+    ReadingCount,
+    Description
+
+
+// ---------------------------------------------------------------------------
+// COMBINED: All Active Alerts Summary
+// Useful as a unified alert view in Data Activator or dashboard
+// ---------------------------------------------------------------------------
+let voltage_alerts =
+    SubstationReadings
+    | where Timestamp > ago(5m)
+    | where VoltageKV < 210 or VoltageKV > 240
+    | summarize LatestTimestamp = max(Timestamp), Value = round(avg(VoltageKV), 2) by SubstationId, SubstationName
+    | extend AlertType = "Voltage", Severity = "Critical", Unit = "kV";
+let frequency_alerts =
+    SubstationReadings
+    | where Timestamp > ago(5m)
+    | where abs(FrequencyHz - 50.0) > 0.5
+    | summarize LatestTimestamp = max(Timestamp), Value = round(avg(FrequencyHz), 3) by SubstationId, SubstationName
+    | extend AlertType = "Frequency", Severity = iff(abs(Value - 50.0) > 1.0, "Critical", "Warning"), Unit = "Hz";
+let overload_alerts =
+    SubstationReadings
+    | where Timestamp > ago(5m)
+    | where LoadPct > 90
+    | summarize LatestTimestamp = max(Timestamp), Value = round(avg(LoadPct), 1) by SubstationId, SubstationName
+    | extend AlertType = "Overload", Severity = iff(Value > 95, "Critical", "Warning"), Unit = "%";
+let temp_alerts =
+    SubstationReadings
+    | where Timestamp > ago(5m)
+    | where TransformerTempC > 85
+    | summarize LatestTimestamp = max(Timestamp), Value = round(avg(TransformerTempC), 1) by SubstationId, SubstationName
+    | extend AlertType = "Temperature", Severity = "Critical", Unit = "°C";
+union voltage_alerts, frequency_alerts, overload_alerts, temp_alerts
+| project LatestTimestamp, SubstationId, SubstationName, AlertType, Severity, Value, Unit
+| order by LatestTimestamp desc

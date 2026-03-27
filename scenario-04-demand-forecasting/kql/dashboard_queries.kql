@@ -1,0 +1,238 @@
+// =============================================================================
+// Scenariusz 04: Prognozowanie Popytu — Zapytania dla Real-Time Dashboard
+// Eventhouse: EH_SmartMeters | Baza KQL: MeterReadings
+// =============================================================================
+
+// =============================================================================
+// 1. Bieżące obciążenie sieci — sumaryczna moc z ostatnich 5 minut [MW]
+//    Wizualizacja: Gauge / KPI card
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(5m)
+| summarize
+    total_power_mw = round(sum(power_kw) / 1000, 2),
+    active_meters = dcount(meter_id),
+    total_energy_mwh = round(sum(active_energy_kwh) / 1000, 3),
+    avg_voltage = round(avg(voltage_v), 1),
+    avg_power_factor = round(avg(power_factor), 3)
+| extend
+    grid_capacity_mw = 2500.0,
+    utilization_pct = round(total_power_mw / 2500.0 * 100, 1),
+    measurement_time = now()
+
+// =============================================================================
+// 2. Zużycie wg segmentu klientów — dane do wykresu kołowego
+//    Wizualizacja: Pie chart
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(15m)
+| summarize
+    total_power_kw = round(sum(power_kw), 1),
+    total_energy_kwh = round(sum(active_energy_kwh), 1),
+    meter_count = dcount(meter_id),
+    avg_power_kw = round(avg(power_kw), 2)
+    by customer_segment
+| extend total_all = toscalar(
+    SmartMeterReadings
+    | where timestamp > ago(15m)
+    | summarize sum(power_kw)
+  )
+| extend share_pct = round(total_power_kw / total_all * 100, 1)
+| order by total_power_kw desc
+
+// =============================================================================
+// 3. Porównanie popytu wg regionów
+//    Wizualizacja: Bar chart / Heatmap
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(15m)
+| summarize
+    total_power_mw = round(sum(power_kw) / 1000, 2),
+    total_energy_mwh = round(sum(active_energy_kwh) / 1000, 3),
+    meter_count = dcount(meter_id),
+    avg_power_kw = round(avg(power_kw), 2),
+    max_power_kw = round(max(power_kw), 2),
+    avg_voltage = round(avg(voltage_v), 1)
+    by region
+| extend power_per_meter_kw = round(total_power_mw * 1000 / meter_count, 2)
+| order by total_power_mw desc
+
+// =============================================================================
+// 4. Trend zużycia — ostatnie 24 godziny w podziale na segmenty
+//    Wizualizacja: Stacked area chart
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(24h)
+| summarize
+    total_power_mw = round(sum(power_kw) / 1000, 2),
+    total_energy_mwh = round(sum(active_energy_kwh) / 1000, 3),
+    meter_count = dcount(meter_id)
+    by bin(timestamp, 15m), customer_segment
+| order by timestamp asc, customer_segment
+
+// =============================================================================
+// 5. Wykrywanie szczytu — momenty przekroczenia progu obciążenia
+//    Wizualizacja: Table z alertami / Threshold line on chart
+// =============================================================================
+let peak_threshold_mw = 2000.0;
+let warning_threshold_mw = 1700.0;
+SmartMeterReadings
+| where timestamp > ago(24h)
+| summarize total_power_mw = sum(power_kw) / 1000 by bin(timestamp, 5m)
+| extend
+    status = case(
+        total_power_mw >= peak_threshold_mw, "CRITICAL",
+        total_power_mw >= warning_threshold_mw, "WARNING",
+        "NORMAL"
+    ),
+    threshold_mw = peak_threshold_mw,
+    warning_mw = warning_threshold_mw
+| where status != "NORMAL"
+| order by timestamp desc
+
+// =============================================================================
+// 6. Korelacja pogoda vs zużycie
+//    Wizualizacja: Dual-axis line chart (overlay)
+//    Uwaga: wymaga tabeli WeatherReadings lub joina z Lakehouse
+//    Poniżej wersja uproszczona — analiza wzorca godzinowego
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(7d)
+| extend hour_of_day = hourofday(timestamp), day_date = startofday(timestamp)
+| summarize
+    avg_power_mw = round(avg(power_kw) * dcount(meter_id) / 1000, 2),
+    total_energy_mwh = round(sum(active_energy_kwh) / 1000, 2),
+    avg_voltage = round(avg(voltage_v), 1)
+    by hour_of_day, day_date
+| order by day_date asc, hour_of_day asc
+
+// =============================================================================
+// 7. Analiza stref taryfowych — zużycie i moc wg taryfy
+//    Wizualizacja: Grouped bar chart
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(24h)
+| summarize
+    total_energy_kwh = round(sum(active_energy_kwh), 1),
+    total_power_kw = round(sum(power_kw), 1),
+    meter_count = dcount(meter_id),
+    avg_power_kw = round(avg(power_kw), 2),
+    avg_power_factor = round(avg(power_factor), 3)
+    by tariff_zone
+| extend
+    energy_per_meter_kwh = round(total_energy_kwh / meter_count, 2),
+    segment_description = case(
+        tariff_zone startswith "G", "Gospodarstwa domowe",
+        tariff_zone startswith "C", "Odbiorcy komercyjni",
+        tariff_zone startswith "B", "Odbiorcy biznesowi (SN)",
+        tariff_zone startswith "A", "Odbiorcy przemysłowi (WN)",
+        "Inni"
+    )
+| order by total_energy_kwh desc
+
+// =============================================================================
+// 8. Wykrywanie anomalii — liczniki z nietypowymi skokami zużycia
+//    Wizualizacja: Table z flagami / Scatter plot
+// =============================================================================
+let lookback_period = 7d;
+let recent_window = 15m;
+let anomaly_threshold = 3.0;
+let baseline = SmartMeterReadings
+    | where timestamp between (ago(lookback_period) .. ago(1h))
+    | summarize
+        avg_power = avg(power_kw),
+        stdev_power = stdev(power_kw)
+        by meter_id, customer_segment, region;
+SmartMeterReadings
+| where timestamp > ago(recent_window)
+| summarize
+    current_power = avg(power_kw),
+    current_energy = sum(active_energy_kwh),
+    current_voltage = avg(voltage_v)
+    by meter_id, customer_id, customer_segment, region
+| join kind=inner baseline on meter_id
+| extend
+    z_score = iff(stdev_power > 0, (current_power - avg_power) / stdev_power, 0.0),
+    ratio = round(current_power / avg_power, 2)
+| where z_score > anomaly_threshold or current_power > avg_power * anomaly_threshold
+| project
+    meter_id,
+    customer_id,
+    customer_segment,
+    region,
+    current_power_kw = round(current_power, 2),
+    baseline_avg_kw = round(avg_power, 2),
+    ratio,
+    z_score = round(z_score, 2),
+    anomaly_severity = case(
+        z_score > 5.0, "HIGH",
+        z_score > anomaly_threshold, "MEDIUM",
+        "LOW"
+    )
+| order by z_score desc
+
+// =============================================================================
+// 9. Krzywa trwania obciążenia (Load Duration Curve) — ostatnie 30 dni
+//    Wizualizacja: Line chart (sorted descending)
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(30d)
+| summarize total_power_mw = sum(power_kw) / 1000 by bin(timestamp, 1h)
+| order by total_power_mw desc
+| extend
+    rank = row_number(),
+    total_hours = toscalar(
+        SmartMeterReadings
+        | where timestamp > ago(30d)
+        | summarize count_hours = dcount(bin(timestamp, 1h))
+    )
+| extend
+    duration_pct = round(todouble(rank) / todouble(total_hours) * 100, 1),
+    total_power_mw = round(total_power_mw, 2)
+| project duration_pct, total_power_mw, rank, timestamp
+
+// =============================================================================
+// 10. Śledzenie dokładności prognozy — porównanie z prognozą
+//     Wizualizacja: Dual-axis line + error bars
+//     Wymaga tabeli DemandForecasts w Eventhouse lub materialized view
+// =============================================================================
+let actual_demand = SmartMeterReadings
+    | where timestamp > ago(7d)
+    | summarize actual_mw = round(sum(power_kw) / 1000, 2) by bin(timestamp, 1h);
+actual_demand
+| extend
+    hour_of_day = hourofday(timestamp),
+    day_of_week = dayofweek(timestamp) / 1d,
+    is_weekend = dayofweek(timestamp) / 1d in (5, 6)
+| order by timestamp asc
+// Uwaga: pełne śledzenie dokładności prognozy wymaga joina z tabelą
+// DemandForecasts z Lakehouse. Powyższe zapytanie dostarcza dane rzeczywiste,
+// które można porównać z prognozami w Data Agent lub w notebooku.
+
+// =============================================================================
+// BONUS: Profil dobowy — średni wzorzec godzinowy wg segmentu (ostatnie 7 dni)
+//        Wizualizacja: Multi-line chart
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(7d)
+| extend hour_of_day = hourofday(timestamp)
+| summarize
+    avg_power_kw = round(avg(power_kw), 2),
+    p50_power_kw = round(percentile(power_kw, 50), 2),
+    p95_power_kw = round(percentile(power_kw, 95), 2),
+    meter_count = dcount(meter_id)
+    by hour_of_day, customer_segment
+| order by customer_segment, hour_of_day
+
+// =============================================================================
+// BONUS: Top 10 regionów wg zużycia w bieżącym oknie
+//        Wizualizacja: Horizontal bar chart
+// =============================================================================
+SmartMeterReadings
+| where timestamp > ago(15m)
+| summarize
+    total_mw = round(sum(power_kw) / 1000, 2),
+    meters = dcount(meter_id)
+    by region
+| top 10 by total_mw desc
+| extend rank = row_number()

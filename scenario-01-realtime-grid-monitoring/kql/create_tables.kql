@@ -1,0 +1,179 @@
+// ============================================================================
+// Scenario 01: Real-Time Grid Monitoring — KQL Table Creation
+// Database: GridTelemetry (Eventhouse: EH_GridMonitoring)
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// 1. SubstationReadings — main telemetry table (~500k rows / 24h)
+// ---------------------------------------------------------------------------
+.create table SubstationReadings (
+    Timestamp: datetime,
+    SubstationId: string,
+    SubstationName: string,
+    Latitude: real,
+    Longitude: real,
+    VoltageKV: real,
+    CurrentA: real,
+    FrequencyHz: real,
+    PowerFactor: real,
+    ActivePowerMW: real,
+    ReactivePowerMVAR: real,
+    LoadPct: real,
+    TransformerTempC: real,
+    AmbientTempC: real,
+    Status: string
+)
+
+// ---------------------------------------------------------------------------
+// 2. SubstationEvents — anomaly and event log (~2000 rows / 24h)
+// ---------------------------------------------------------------------------
+.create table SubstationEvents (
+    Timestamp: datetime,
+    EventId: string,
+    SubstationId: string,
+    SubstationName: string,
+    EventType: string,
+    Severity: string,
+    Description: string,
+    Resolved: bool,
+    ResolutionTimeMin: real
+)
+
+// ---------------------------------------------------------------------------
+// 3. SubstationsMaster — static reference data (50 rows)
+// ---------------------------------------------------------------------------
+.create table SubstationsMaster (
+    SubstationId: string,
+    Name: string,
+    Latitude: real,
+    Longitude: real,
+    VoltageLevelKV: int,
+    Region: string,
+    CommissionedYear: int,
+    CapacityMVA: int,
+    TransformerCount: int
+)
+
+// ---------------------------------------------------------------------------
+// 4. Ingestion mappings — CSV format
+// ---------------------------------------------------------------------------
+.create table SubstationReadings ingestion csv mapping 'SubstationReadings_CSV_Mapping'
+```
+[
+    {"Name": "Timestamp",           "DataType": "datetime", "Ordinal": 0},
+    {"Name": "SubstationId",        "DataType": "string",   "Ordinal": 1},
+    {"Name": "SubstationName",      "DataType": "string",   "Ordinal": 2},
+    {"Name": "Latitude",            "DataType": "real",     "Ordinal": 3},
+    {"Name": "Longitude",           "DataType": "real",     "Ordinal": 4},
+    {"Name": "VoltageKV",           "DataType": "real",     "Ordinal": 5},
+    {"Name": "CurrentA",            "DataType": "real",     "Ordinal": 6},
+    {"Name": "FrequencyHz",         "DataType": "real",     "Ordinal": 7},
+    {"Name": "PowerFactor",         "DataType": "real",     "Ordinal": 8},
+    {"Name": "ActivePowerMW",       "DataType": "real",     "Ordinal": 9},
+    {"Name": "ReactivePowerMVAR",   "DataType": "real",     "Ordinal": 10},
+    {"Name": "LoadPct",             "DataType": "real",     "Ordinal": 11},
+    {"Name": "TransformerTempC",    "DataType": "real",     "Ordinal": 12},
+    {"Name": "AmbientTempC",        "DataType": "real",     "Ordinal": 13},
+    {"Name": "Status",              "DataType": "string",   "Ordinal": 14}
+]
+```
+
+.create table SubstationEvents ingestion csv mapping 'SubstationEvents_CSV_Mapping'
+```
+[
+    {"Name": "Timestamp",           "DataType": "datetime", "Ordinal": 0},
+    {"Name": "EventId",             "DataType": "string",   "Ordinal": 1},
+    {"Name": "SubstationId",        "DataType": "string",   "Ordinal": 2},
+    {"Name": "SubstationName",      "DataType": "string",   "Ordinal": 3},
+    {"Name": "EventType",           "DataType": "string",   "Ordinal": 4},
+    {"Name": "Severity",            "DataType": "string",   "Ordinal": 5},
+    {"Name": "Description",         "DataType": "string",   "Ordinal": 6},
+    {"Name": "Resolved",            "DataType": "bool",     "Ordinal": 7},
+    {"Name": "ResolutionTimeMin",   "DataType": "real",     "Ordinal": 8}
+]
+```
+
+.create table SubstationsMaster ingestion csv mapping 'SubstationsMaster_CSV_Mapping'
+```
+[
+    {"Name": "SubstationId",        "DataType": "string",   "Ordinal": 0},
+    {"Name": "Name",                "DataType": "string",   "Ordinal": 1},
+    {"Name": "Latitude",            "DataType": "real",     "Ordinal": 2},
+    {"Name": "Longitude",           "DataType": "real",     "Ordinal": 3},
+    {"Name": "VoltageLevelKV",      "DataType": "int",      "Ordinal": 4},
+    {"Name": "Region",              "DataType": "string",   "Ordinal": 5},
+    {"Name": "CommissionedYear",    "DataType": "int",      "Ordinal": 6},
+    {"Name": "CapacityMVA",         "DataType": "int",      "Ordinal": 7},
+    {"Name": "TransformerCount",    "DataType": "int",      "Ordinal": 8}
+]
+```
+
+// ---------------------------------------------------------------------------
+// 5. Ingestion mappings — JSON format (for Eventstream)
+// ---------------------------------------------------------------------------
+.create table SubstationReadings ingestion json mapping 'SubstationReadings_JSON_Mapping'
+```
+[
+    {"column": "Timestamp",           "path": "$.timestamp",            "datatype": "datetime"},
+    {"column": "SubstationId",        "path": "$.substation_id",        "datatype": "string"},
+    {"column": "SubstationName",      "path": "$.substation_name",      "datatype": "string"},
+    {"column": "Latitude",            "path": "$.latitude",             "datatype": "real"},
+    {"column": "Longitude",           "path": "$.longitude",            "datatype": "real"},
+    {"column": "VoltageKV",           "path": "$.voltage_kv",           "datatype": "real"},
+    {"column": "CurrentA",            "path": "$.current_a",            "datatype": "real"},
+    {"column": "FrequencyHz",         "path": "$.frequency_hz",         "datatype": "real"},
+    {"column": "PowerFactor",         "path": "$.power_factor",         "datatype": "real"},
+    {"column": "ActivePowerMW",       "path": "$.active_power_mw",      "datatype": "real"},
+    {"column": "ReactivePowerMVAR",   "path": "$.reactive_power_mvar",  "datatype": "real"},
+    {"column": "LoadPct",             "path": "$.load_pct",             "datatype": "real"},
+    {"column": "TransformerTempC",    "path": "$.transformer_temp_c",   "datatype": "real"},
+    {"column": "AmbientTempC",        "path": "$.ambient_temp_c",       "datatype": "real"},
+    {"column": "Status",              "path": "$.status",               "datatype": "string"}
+]
+```
+
+.create table SubstationEvents ingestion json mapping 'SubstationEvents_JSON_Mapping'
+```
+[
+    {"column": "Timestamp",           "path": "$.timestamp",              "datatype": "datetime"},
+    {"column": "EventId",             "path": "$.event_id",              "datatype": "string"},
+    {"column": "SubstationId",        "path": "$.substation_id",         "datatype": "string"},
+    {"column": "SubstationName",      "path": "$.substation_name",       "datatype": "string"},
+    {"column": "EventType",           "path": "$.event_type",            "datatype": "string"},
+    {"column": "Severity",            "path": "$.severity",              "datatype": "string"},
+    {"column": "Description",         "path": "$.description",           "datatype": "string"},
+    {"column": "Resolved",            "path": "$.resolved",              "datatype": "bool"},
+    {"column": "ResolutionTimeMin",   "path": "$.resolution_time_min",   "datatype": "real"}
+]
+```
+
+// ---------------------------------------------------------------------------
+// 6. Enable streaming ingestion on the tables
+// ---------------------------------------------------------------------------
+.alter table SubstationReadings policy streamingingestion enable
+.alter table SubstationEvents policy streamingingestion enable
+
+// ---------------------------------------------------------------------------
+// 7. Retention policy — keep data for 30 days
+// ---------------------------------------------------------------------------
+.alter table SubstationReadings policy retention
+```
+{
+    "SoftDeletePeriod": "30.00:00:00",
+    "Recoverability": "Enabled"
+}
+```
+
+.alter table SubstationEvents policy retention
+```
+{
+    "SoftDeletePeriod": "30.00:00:00",
+    "Recoverability": "Enabled"
+}
+```
+
+// ---------------------------------------------------------------------------
+// 8. Caching policy — hot cache for 7 days
+// ---------------------------------------------------------------------------
+.alter table SubstationReadings policy caching hot = 7d
+.alter table SubstationEvents policy caching hot = 7d

@@ -1,0 +1,171 @@
+// =============================================================================
+// Scenariusz 04: Prognozowanie Popytu — Tworzenie tabel KQL
+// Eventhouse: EH_SmartMeters | Baza KQL: MeterReadings
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Tabela: SmartMeterReadings
+// Odczyty z inteligentnych liczników energii w czasie rzeczywistym
+// -----------------------------------------------------------------------------
+.create table SmartMeterReadings (
+    timestamp: datetime,
+    meter_id: string,
+    customer_id: string,
+    customer_segment: string,
+    region: string,
+    tariff_zone: string,
+    active_energy_kwh: real,
+    reactive_energy_kvarh: real,
+    voltage_v: real,
+    current_a: real,
+    power_factor: real,
+    power_kw: real,
+    daily_max_kw: real
+)
+
+// -----------------------------------------------------------------------------
+// Mapowanie ingestion JSON — dla Eventstream
+// -----------------------------------------------------------------------------
+.create table SmartMeterReadings ingestion json mapping 'SmartMeterReadings_JSON_Mapping'
+    '['
+    '  {"column": "timestamp",              "path": "$.timestamp",              "datatype": "datetime"},'
+    '  {"column": "meter_id",               "path": "$.meter_id",              "datatype": "string"},'
+    '  {"column": "customer_id",            "path": "$.customer_id",           "datatype": "string"},'
+    '  {"column": "customer_segment",       "path": "$.customer_segment",      "datatype": "string"},'
+    '  {"column": "region",                 "path": "$.region",                "datatype": "string"},'
+    '  {"column": "tariff_zone",            "path": "$.tariff_zone",           "datatype": "string"},'
+    '  {"column": "active_energy_kwh",      "path": "$.active_energy_kwh",     "datatype": "real"},'
+    '  {"column": "reactive_energy_kvarh",  "path": "$.reactive_energy_kvarh", "datatype": "real"},'
+    '  {"column": "voltage_v",              "path": "$.voltage_v",             "datatype": "real"},'
+    '  {"column": "current_a",              "path": "$.current_a",             "datatype": "real"},'
+    '  {"column": "power_factor",           "path": "$.power_factor",          "datatype": "real"},'
+    '  {"column": "power_kw",              "path": "$.power_kw",              "datatype": "real"},'
+    '  {"column": "daily_max_kw",          "path": "$.daily_max_kw",          "datatype": "real"}'
+    ']'
+
+// -----------------------------------------------------------------------------
+// Mapowanie ingestion CSV — dla bezpośredniego uploadu
+// -----------------------------------------------------------------------------
+.create table SmartMeterReadings ingestion csv mapping 'SmartMeterReadings_CSV_Mapping'
+    '['
+    '  {"Name": "timestamp",              "DataType": "datetime", "Ordinal": 0},'
+    '  {"Name": "meter_id",               "DataType": "string",   "Ordinal": 1},'
+    '  {"Name": "customer_id",            "DataType": "string",   "Ordinal": 2},'
+    '  {"Name": "customer_segment",       "DataType": "string",   "Ordinal": 3},'
+    '  {"Name": "region",                 "DataType": "string",   "Ordinal": 4},'
+    '  {"Name": "tariff_zone",            "DataType": "string",   "Ordinal": 5},'
+    '  {"Name": "active_energy_kwh",      "DataType": "real",     "Ordinal": 6},'
+    '  {"Name": "reactive_energy_kvarh",  "DataType": "real",     "Ordinal": 7},'
+    '  {"Name": "voltage_v",              "DataType": "real",     "Ordinal": 8},'
+    '  {"Name": "current_a",              "DataType": "real",     "Ordinal": 9},'
+    '  {"Name": "power_factor",           "DataType": "real",     "Ordinal": 10},'
+    '  {"Name": "power_kw",              "DataType": "real",     "Ordinal": 11},'
+    '  {"Name": "daily_max_kw",          "DataType": "real",     "Ordinal": 12}'
+    ']'
+
+// -----------------------------------------------------------------------------
+// Polityka retencji — przechowuj dane 90 dni
+// -----------------------------------------------------------------------------
+.alter table SmartMeterReadings policy retention
+```
+{
+    "SoftDeletePeriod": "90.00:00:00",
+    "Recoverability": "Enabled"
+}
+```
+
+// -----------------------------------------------------------------------------
+// Polityka cache — ostatnie 7 dni w hot cache
+// -----------------------------------------------------------------------------
+.alter table SmartMeterReadings policy caching hot = 7d
+
+// -----------------------------------------------------------------------------
+// Polityka streaming ingestion — włącz dla danych real-time
+// -----------------------------------------------------------------------------
+.alter table SmartMeterReadings policy streamingingestion enable
+
+// -----------------------------------------------------------------------------
+// Polityka partycjonowania — partycjonuj po regionie i dacie
+// -----------------------------------------------------------------------------
+.alter table SmartMeterReadings policy partitioning
+```
+{
+    "PartitionKeys": [
+        {
+            "ColumnName": "timestamp",
+            "Kind": "UniformRange",
+            "Properties": {
+                "Reference": "2024-01-01T00:00:00",
+                "RangeSize": "1.00:00:00",
+                "OverrideCreationTime": false
+            }
+        },
+        {
+            "ColumnName": "region",
+            "Kind": "Hash",
+            "Properties": {
+                "Function": "XxHash64",
+                "MaxPartitionCount": 16
+            }
+        }
+    ]
+}
+```
+
+// -----------------------------------------------------------------------------
+// Funkcja: bieżące obciążenie sieci (MW)
+// -----------------------------------------------------------------------------
+.create-or-alter function CurrentGridLoad() {
+    SmartMeterReadings
+    | where timestamp > ago(5m)
+    | summarize
+        total_power_mw = sum(power_kw) / 1000,
+        meter_count = dcount(meter_id),
+        avg_power_factor = avg(power_factor)
+    | extend load_timestamp = now()
+}
+
+// -----------------------------------------------------------------------------
+// Funkcja: zużycie wg segmentu
+// -----------------------------------------------------------------------------
+.create-or-alter function ConsumptionBySegment(time_window: timespan) {
+    SmartMeterReadings
+    | where timestamp > ago(time_window)
+    | summarize
+        total_kwh = sum(active_energy_kwh),
+        total_power_kw = sum(power_kw),
+        meter_count = dcount(meter_id),
+        avg_power_kw = avg(power_kw)
+        by customer_segment
+    | order by total_power_kw desc
+}
+
+// -----------------------------------------------------------------------------
+// Funkcja: zużycie wg regionu
+// -----------------------------------------------------------------------------
+.create-or-alter function ConsumptionByRegion(time_window: timespan) {
+    SmartMeterReadings
+    | where timestamp > ago(time_window)
+    | summarize
+        total_kwh = sum(active_energy_kwh),
+        total_power_mw = sum(power_kw) / 1000,
+        meter_count = dcount(meter_id)
+        by region
+    | order by total_power_mw desc
+}
+
+// -----------------------------------------------------------------------------
+// Funkcja: wykrywanie anomalii (odczyty > 3x średniej)
+// -----------------------------------------------------------------------------
+.create-or-alter function AnomalyDetection(lookback: timespan, threshold_multiplier: real) {
+    let avg_by_meter = SmartMeterReadings
+        | where timestamp between (ago(lookback) .. ago(1h))
+        | summarize avg_power = avg(power_kw) by meter_id;
+    SmartMeterReadings
+    | where timestamp > ago(15m)
+    | join kind=inner avg_by_meter on meter_id
+    | where power_kw > avg_power * threshold_multiplier
+    | project timestamp, meter_id, customer_id, customer_segment, region,
+              power_kw, avg_power, ratio = power_kw / avg_power
+    | order by ratio desc
+}

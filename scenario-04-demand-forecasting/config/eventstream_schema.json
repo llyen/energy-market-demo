@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SmartMeterReading",
+  "description": "Schemat wiadomości z inteligentnego licznika energii dla Eventstream ES_SmartMeters",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "meter_id",
+    "customer_id",
+    "customer_segment",
+    "region",
+    "tariff_zone",
+    "active_energy_kwh",
+    "reactive_energy_kvarh",
+    "voltage_v",
+    "current_a",
+    "power_factor",
+    "power_kw",
+    "daily_max_kw"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Czas odczytu w formacie ISO 8601 ze strefą czasową CET (Europe/Warsaw)",
+      "examples": ["2025-01-15T14:30:00+01:00"]
+    },
+    "meter_id": {
+      "type": "string",
+      "pattern": "^SM-[0-9]{5}$",
+      "description": "Unikalny identyfikator inteligentnego licznika",
+      "examples": ["SM-00001", "SM-04999"]
+    },
+    "customer_id": {
+      "type": "string",
+      "pattern": "^CUST-[0-9]{6}$",
+      "description": "Identyfikator klienta powiązanego z licznikiem",
+      "examples": ["CUST-000001", "CUST-049999"]
+    },
+    "customer_segment": {
+      "type": "string",
+      "enum": ["Household", "Industry", "Services", "Agriculture", "Public"],
+      "description": "Segment klienta: Household (gospodarstwo domowe), Industry (przemysł), Services (usługi), Agriculture (rolnictwo), Public (sektor publiczny)"
+    },
+    "region": {
+      "type": "string",
+      "enum": [
+        "Mazowieckie",
+        "Śląskie",
+        "Wielkopolskie",
+        "Małopolskie",
+        "Dolnośląskie",
+        "Łódzkie",
+        "Pomorskie",
+        "Lubelskie",
+        "Podkarpackie",
+        "Kujawsko-Pomorskie"
+      ],
+      "description": "Województwo, w którym zlokalizowany jest licznik"
+    },
+    "tariff_zone": {
+      "type": "string",
+      "enum": ["G11", "G12", "G13", "C11", "C21", "B11", "B21", "A23"],
+      "description": "Polska grupa taryfowa: G=gospodarstwa domowe, C=komercyjni, B=średnie napięcie, A=wysokie napięcie"
+    },
+    "active_energy_kwh": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Energia czynna pobrana w okresie odczytowym [kWh]",
+      "examples": [1.25, 45.8, 125.0]
+    },
+    "reactive_energy_kvarh": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Energia bierna pobrana w okresie odczytowym [kvarh]",
+      "examples": [0.15, 12.3, 35.0]
+    },
+    "voltage_v": {
+      "type": "number",
+      "minimum": 180,
+      "maximum": 260,
+      "description": "Średnie napięcie w punkcie pomiaru [V]. Wartość nominalna 230V.",
+      "examples": [228.5, 231.2, 226.8]
+    },
+    "current_a": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Średni prąd w okresie odczytowym [A]",
+      "examples": [4.5, 65.2, 215.0]
+    },
+    "power_factor": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Współczynnik mocy (cos φ). Wartość 1.0 = idealna; <0.9 = kary za energię bierną",
+      "examples": [0.95, 0.88, 0.99]
+    },
+    "power_kw": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Moc czynna chwilowa [kW]",
+      "examples": [2.5, 85.0, 350.0]
+    },
+    "daily_max_kw": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Dotychczasowa maksymalna moc dobowa [kW]. Resetowana o północy.",
+      "examples": [5.2, 120.0, 480.0]
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "timestamp": "2025-01-15T14:30:00+01:00",
+      "meter_id": "SM-00042",
+      "customer_id": "CUST-000042",
+      "customer_segment": "Household",
+      "region": "Mazowieckie",
+      "tariff_zone": "G12",
+      "active_energy_kwh": 1.85,
+      "reactive_energy_kvarh": 0.22,
+      "voltage_v": 229.4,
+      "current_a": 8.1,
+      "power_factor": 0.97,
+      "power_kw": 3.2,
+      "daily_max_kw": 5.8
+    },
+    {
+      "timestamp": "2025-01-15T14:30:00+01:00",
+      "meter_id": "SM-02500",
+      "customer_id": "CUST-025000",
+      "customer_segment": "Industry",
+      "region": "Śląskie",
+      "tariff_zone": "B21",
+      "active_energy_kwh": 87.5,
+      "reactive_energy_kvarh": 23.1,
+      "voltage_v": 231.0,
+      "current_a": 185.0,
+      "power_factor": 0.91,
+      "power_kw": 245.0,
+      "daily_max_kw": 410.0
+    }
+  ]
+}

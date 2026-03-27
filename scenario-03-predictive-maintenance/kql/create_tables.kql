@@ -1,0 +1,92 @@
+// ============================================================
+// Scenario 03: Predictive Maintenance — KQL Table Definitions
+// Eventhouse: EH_WindFarms | KQL Database: TurbineTelemetry
+// ============================================================
+
+// ----- Table: TurbineSensorData -----
+// Real-time and historical sensor telemetry from 200 wind turbines
+.create table TurbineSensorData (
+    timestamp: datetime,
+    turbine_id: string,
+    farm_name: string,
+    wind_speed_ms: real,
+    rotor_rpm: real,
+    generator_rpm: real,
+    blade_pitch_deg: real,
+    nacelle_direction_deg: real,
+    power_output_kw: real,
+    gearbox_temp_c: real,
+    bearing_temp_c: real,
+    generator_temp_c: real,
+    hydraulic_pressure_bar: real,
+    vibration_mm_s: real,
+    oil_viscosity: real,
+    ambient_temp_c: real,
+    humidity_pct: real,
+    status: string
+)
+
+// ----- Ingestion mapping for CSV upload -----
+.create table TurbineSensorData ingestion csv mapping 'TurbineSensorData_CSV_Mapping'
+```
+[
+    {"Name": "timestamp",              "DataType": "datetime", "Ordinal": 0},
+    {"Name": "turbine_id",             "DataType": "string",   "Ordinal": 1},
+    {"Name": "farm_name",              "DataType": "string",   "Ordinal": 2},
+    {"Name": "wind_speed_ms",          "DataType": "real",     "Ordinal": 3},
+    {"Name": "rotor_rpm",              "DataType": "real",     "Ordinal": 4},
+    {"Name": "generator_rpm",          "DataType": "real",     "Ordinal": 5},
+    {"Name": "blade_pitch_deg",        "DataType": "real",     "Ordinal": 6},
+    {"Name": "nacelle_direction_deg",  "DataType": "real",     "Ordinal": 7},
+    {"Name": "power_output_kw",        "DataType": "real",     "Ordinal": 8},
+    {"Name": "gearbox_temp_c",         "DataType": "real",     "Ordinal": 9},
+    {"Name": "bearing_temp_c",         "DataType": "real",     "Ordinal": 10},
+    {"Name": "generator_temp_c",       "DataType": "real",     "Ordinal": 11},
+    {"Name": "hydraulic_pressure_bar", "DataType": "real",     "Ordinal": 12},
+    {"Name": "vibration_mm_s",         "DataType": "real",     "Ordinal": 13},
+    {"Name": "oil_viscosity",          "DataType": "real",     "Ordinal": 14},
+    {"Name": "ambient_temp_c",         "DataType": "real",     "Ordinal": 15},
+    {"Name": "humidity_pct",           "DataType": "real",     "Ordinal": 16},
+    {"Name": "status",                 "DataType": "string",   "Ordinal": 17}
+]
+```
+
+// ----- Ingestion mapping for JSON (streaming) -----
+.create table TurbineSensorData ingestion json mapping 'TurbineSensorData_JSON_Mapping'
+```
+[
+    {"Column": "timestamp",              "Path": "$.timestamp",              "DataType": "datetime"},
+    {"Column": "turbine_id",             "Path": "$.turbine_id",             "DataType": "string"},
+    {"Column": "farm_name",              "Path": "$.farm_name",              "DataType": "string"},
+    {"Column": "wind_speed_ms",          "Path": "$.wind_speed_ms",          "DataType": "real"},
+    {"Column": "rotor_rpm",              "Path": "$.rotor_rpm",              "DataType": "real"},
+    {"Column": "generator_rpm",          "Path": "$.generator_rpm",          "DataType": "real"},
+    {"Column": "blade_pitch_deg",        "Path": "$.blade_pitch_deg",        "DataType": "real"},
+    {"Column": "nacelle_direction_deg",  "Path": "$.nacelle_direction_deg",  "DataType": "real"},
+    {"Column": "power_output_kw",        "Path": "$.power_output_kw",        "DataType": "real"},
+    {"Column": "gearbox_temp_c",         "Path": "$.gearbox_temp_c",         "DataType": "real"},
+    {"Column": "bearing_temp_c",         "Path": "$.bearing_temp_c",         "DataType": "real"},
+    {"Column": "generator_temp_c",       "Path": "$.generator_temp_c",       "DataType": "real"},
+    {"Column": "hydraulic_pressure_bar", "Path": "$.hydraulic_pressure_bar", "DataType": "real"},
+    {"Column": "vibration_mm_s",         "Path": "$.vibration_mm_s",         "DataType": "real"},
+    {"Column": "oil_viscosity",          "Path": "$.oil_viscosity",          "DataType": "real"},
+    {"Column": "ambient_temp_c",         "Path": "$.ambient_temp_c",         "DataType": "real"},
+    {"Column": "humidity_pct",           "Path": "$.humidity_pct",           "DataType": "real"},
+    {"Column": "status",                 "Path": "$.status",                 "DataType": "string"}
+]
+```
+
+// ----- Retention policy: 90 days -----
+.alter table TurbineSensorData policy retention
+```
+{
+    "SoftDeletePeriod": "90.00:00:00",
+    "Recoverability": "Enabled"
+}
+```
+
+// ----- Caching policy: 30 days hot cache -----
+.alter table TurbineSensorData policy caching hot = 30d
+
+// ----- Enable streaming ingestion -----
+.alter table TurbineSensorData policy streamingingestion enable

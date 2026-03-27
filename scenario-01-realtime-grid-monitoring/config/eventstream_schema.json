@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SubstationReading",
+  "description": "Schema for Eventstream messages from power grid substation telemetry. Used for column mapping configuration in Microsoft Fabric Eventstream.",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "substation_id",
+    "substation_name",
+    "latitude",
+    "longitude",
+    "voltage_kv",
+    "current_a",
+    "frequency_hz",
+    "power_factor",
+    "active_power_mw",
+    "reactive_power_mvar",
+    "load_pct",
+    "transformer_temp_c",
+    "ambient_temp_c",
+    "status"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp with CET/CEST timezone (Europe/Warsaw). Example: 2025-01-15T14:30:00+01:00"
+    },
+    "substation_id": {
+      "type": "string",
+      "pattern": "^SUB-\\d{3}$",
+      "description": "Unique substation identifier (SUB-001 through SUB-050)."
+    },
+    "substation_name": {
+      "type": "string",
+      "description": "Human-readable name of the substation. Example: 'Warszawa Mory'."
+    },
+    "latitude": {
+      "type": "number",
+      "minimum": 49.0,
+      "maximum": 55.0,
+      "description": "Latitude of the substation in decimal degrees (WGS84)."
+    },
+    "longitude": {
+      "type": "number",
+      "minimum": 14.0,
+      "maximum": 24.5,
+      "description": "Longitude of the substation in decimal degrees (WGS84)."
+    },
+    "voltage_kv": {
+      "type": "number",
+      "minimum": 190.0,
+      "maximum": 250.0,
+      "description": "Measured voltage at main busbar in kilovolts. Nominal: 220 kV, range ±15 kV under normal conditions."
+    },
+    "current_a": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 900.0,
+      "description": "Load current in amperes."
+    },
+    "frequency_hz": {
+      "type": "number",
+      "minimum": 49.0,
+      "maximum": 51.0,
+      "description": "Grid frequency in hertz. Nominal: 50.000 Hz. Normal range: 49.8–50.2 Hz."
+    },
+    "power_factor": {
+      "type": "number",
+      "minimum": 0.80,
+      "maximum": 1.00,
+      "description": "Power factor (cos φ). Target: >0.95. Warning below 0.90."
+    },
+    "active_power_mw": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 300.0,
+      "description": "Active power in megawatts."
+    },
+    "reactive_power_mvar": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0,
+      "description": "Reactive power in megavolt-amperes reactive."
+    },
+    "load_pct": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0,
+      "description": "Transformer load as percentage of rated capacity. Warning >85%, Critical >90%."
+    },
+    "transformer_temp_c": {
+      "type": "number",
+      "minimum": 20.0,
+      "maximum": 120.0,
+      "description": "Transformer oil/winding temperature in degrees Celsius. Warning >75°C, Critical >85°C."
+    },
+    "ambient_temp_c": {
+      "type": "number",
+      "minimum": -25.0,
+      "maximum": 45.0,
+      "description": "Ambient (outdoor) temperature at the substation in degrees Celsius."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["Normal", "Warning", "Critical"],
+      "description": "Operational status determined by monitoring logic. Normal: all parameters in range. Warning: one or more parameters near threshold. Critical: immediate attention required."
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "timestamp": "2025-01-15T14:30:00+01:00",
+      "substation_id": "SUB-001",
+      "substation_name": "Warszawa Mory",
+      "latitude": 52.1911,
+      "longitude": 20.8556,
+      "voltage_kv": 219.45,
+      "current_a": 342.7,
+      "frequency_hz": 50.012,
+      "power_factor": 0.963,
+      "active_power_mw": 145.32,
+      "reactive_power_mvar": 22.15,
+      "load_pct": 62.4,
+      "transformer_temp_c": 58.3,
+      "ambient_temp_c": 2.1,
+      "status": "Normal"
+    },
+    {
+      "timestamp": "2025-01-15T18:45:10+01:00",
+      "substation_id": "SUB-013",
+      "substation_name": "Katowice Łagisza",
+      "latitude": 50.3283,
+      "longitude": 19.14,
+      "voltage_kv": 205.12,
+      "current_a": 756.2,
+      "frequency_hz": 49.62,
+      "power_factor": 0.882,
+      "active_power_mw": 234.87,
+      "reactive_power_mvar": 45.6,
+      "load_pct": 94.3,
+      "transformer_temp_c": 87.1,
+      "ambient_temp_c": -1.5,
+      "status": "Critical"
+    }
+  ]
+}
